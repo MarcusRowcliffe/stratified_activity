@@ -20,7 +20,7 @@ dvmsmix <- function(x, prm){
   if(length(k)==1) p  <- 1 else p <- c(1-sum(p), p)
   res <- rep(0, length(x))
   for(i in 1:length(k))
-    res <- res + p[i]*dvonmises(circular(x),circular(m[i]),k[i])
+    res <- res + p[i]*activity::dvonm(x, m[i], k[i])
   res
 }
 

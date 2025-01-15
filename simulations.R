@@ -80,15 +80,12 @@ scenarios <- expand.grid(alignment=1:4,
   mutate(depdat = case_when(config=="strSkew" ~ "strat", .default = "rep"),
          strdat = case_when(config=="repEven" ~ "even", .default = "skew"))
 
-res <- lapply(1:nrow(scenarios), run_scenario_s, reps=10)
+res <- lapply(1:nrow(scenarios), run_scenario_s, reps=4)
 errors <- calc_errors(res) %>%
   mutate(effort = fct_relevel(effort, "low", "med", "high"))
 sum(errors$n1==0)
 sum(errors$n2==0)
 View(errors)
-
-save.image()
-load(".RData")
 
 # scenario patterns
 scenario_plots <- lapply(1:8, function(s) plot_scenario_patterns(s))

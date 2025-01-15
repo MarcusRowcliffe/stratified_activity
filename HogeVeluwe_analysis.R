@@ -1,91 +1,15 @@
 # ANALYSIS: ACTIVITY/HABITAT USE ####
-## Read Agouti datapackage ####
-dir <- "./Hoge Veluwe data/hoge-veluwe-wildlife-monitoring-project-20240816202112"
-ctdpdat <- read_camtrap_dp(file.path(dir, "datapackage.json"), FALSE)
+# Read deployments and observations 
+# See HogeVeluwe_DataProcessing.r for derivation of these files
+dir <- "./HogeVeluweData"
+deployments <- read.csv(file.path(dir, "./HogeVeluweData/deployments.csv")) %>%
+  mutate(start = lubridate::ymd_hms(start, truncated = 3),
+         end = lubridate::ymd_hms(end, truncated = 3))
 
-# Check out parsing problems
-#probs <- frictionless::problems(ctdpdat$data$observations)
-#obs <- read.csv(file.path(dir, "observations.csv"))
-#View(ctdpdat$data$observations[probs$row,])
-#sum(obs[probs$row,]$observationType=="animal", na.rm=T)
-# some malformed dates, but not enough to worry about - only 4 animal observations
-
-# Remove some deployments:
-# - missing_dep has no animal observations and is missing from deployments
-# - locationName codes V## (not in study design)
-missing_dep <- "51f1d2cf-403b-49ff-8cf1-3911db9dcb2c"
-ctdpdat$data$media <- data.frame(deploymentID=0) # need this to make next line run
-ctdpdat <- ctdpdat %>%
-  subset_deployments(deploymentID != missing_dep &
-                       nchar(locationName) > 3)
-
-# Standardise location names; add stratumID
-fix_locationNames <- function(x){
-  ifelse(grepl("OB", x), 
-         paste0(substr(x, 4, 5),
-                substr(x,1,2), "-", 
-                substr(x, nchar(x)-1, nchar(x))),
-         ifelse(nchar(x) == 11, 
-                substr(x, 1, 7),
-                x))
-}
-ctdpdat$data$deployments <- ctdpdat$data$deployments %>%
-  mutate(locationName = fix_locationNames(locationName),
-         habitatNum = substr(locationName, 2, 2),
-         typeNum = substr(locationName, 4, 4),
-         habitat = case_when(
-           habitatNum == "1" ~ "sand",
-           habitatNum %in% c("2", "3") ~ "heath",
-           habitatNum %in% c("4", "5") ~ "forest",
-           habitatNum == "6" ~ "meadow"),
-         type = case_when(
-           typeNum == "1" ~ "rest",
-           typeNum == "0" ~ "public",
-           typeNum == "B" ~ "OB"),
-         stratumID = paste(habitat, type))
-
-# Filter species, add common names and time of day
-table(ctdpdat$data$observations$scientificName) %>%
-  sort()
-spp <- c("Capreolus capreolus", "Cervus elaphus", "Ovis ammon", "Sus scrofa",
-         "Vulpes vulpes", "Lepus europaeus", "Meles meles")
-species <- c("roe_deer", "red_deer", "mouflon", "wild_boar",
-             "red_fox", "brown_hare", "badger")
-ctdpdat$data$observations <- ctdpdat$data$observations %>%
-  mutate(scientificName = ifelse(scientificName=="Leporidae", 
-                                 "Lepus europaeus", scientificName)) %>%
-  filter(scientificName %in% spp) %>%
-  mutate(commonName = species[match(scientificName, spp)],
-         time = time_of_day(timestamp))
-#ctdpdat$data$observations %>%
-#  filter(is.na(time)) %>%
-#  View()
-# A handful of malformed dates, hopefully negligible
-
-# slice up the data into annual chunks
-starts <- paste0(2014:2020, "-03-01 00:00:00")
-ends <- paste0(2014:2020, "-05-31 00:00:00")
-ctdpdat$data <- ctdpdat$data[-2] # remove media table to make next step run
-ctdpslices <- lapply(1:length(starts), function(i) 
-  slice_camtrap_dp(ctdpdat, starts[i], ends[i]))
-#lapply(ctdpslices, plot_deployment_schedule)
-
-# bind sliced ctdp list in a single datapackage
-ctdpbound <- ctdpdat
-ctdpbound$data$deployments <- ctdpslices %>%
-  lapply(function(d) d$data$deployments) %>%
-  bind_rows() %>%
-  mutate(year = year(start),
-         locationYear = paste(locationName, year, sep="-"))
-ctdpbound$data$observations <- ctdpslices %>%
-  lapply(function(d) d$data$observations) %>%
-  bind_rows() %>%
-  mutate(year = year(timestamp))
-table(ctdpbound$data$observations$commonName) %>%
-  sort()
+observations <- read.csv(file.path(dir, "./HogeVeluweData/observations.csv")) %>%
+  mutate(timestamp = lubridate::ymd_hms(timestamp, truncated = 3))
 
 ## Read stratum data ####
-dir <- "./Hoge Veluwe data"
 # Raw stratum data
 full_strata <- read.csv(file.path(dir, "Habitat Availability Hoge Veluwe 2012-2023.csv"))
 # Stratum data for density analysis: 
@@ -113,7 +37,10 @@ den_strata <- full_strata %>%
 # - average areas over years
 act_strata <- den_strata %>%
   mutate(type = ifelse(type=="OB", "public", type),
-         stratumID = paste(habitat, type)) %>%
+         stratumID = paste(habitat, type),
+         species = ifelse(grepl("deer", species),
+                          paste0(species, "_badger_red_fox_brown_hare"),
+                          species)) %>%
   group_by(species, year, habitat, type, stratumID) %>%
   summarise(area = sum(area)) %>%
   group_by(species, habitat, type, stratumID) %>%
@@ -168,15 +95,13 @@ dblsig <- function(time, e1, e2, slp=15){
 # Deployment table for activity analyses:
 # - merge OB with public
 # - add effort field
-dep <- ctdpbound$data$deployments %>%
+dep <- deployments %>%
   mutate(stratumID = sub("OB", "public", stratumID),
          effort = as.numeric(difftime(end, start, units="days")))
 # function fits stratified activity model for a given species
 fitfunc <- function(sp, reps){
   if(sp %in% species[5:7]){
     spd <- ang <- rad <- NULL
-    str <- act_strata %>%
-      filter(grepl("roe_deer", species,))
   } else{
     spdFunc <- function(time, stratum){
       habs <- strsplit(stratum, " ") %>%
@@ -209,13 +134,13 @@ fitfunc <- function(sp, reps){
         slice(match(habs, habitat)) %>%
         .$est
     }
-    str <- act_strata %>%
-      filter(grepl(sp, species,))
     spd <- pmat_from_func(spdFunc, str)
     ang <- pmat_from_func(angFunc, str)
     rad <- pmat_from_func(radFunc, str)
   }
-  obs <- subset(ctdpbound$data$observations, commonName==sp)
+  str <- act_strata %>%
+    filter(grepl(sp, species,))
+  obs <- subset(observations, commonName==sp)
   fitact_strat(obs, dep, str, spd, rad, ang, reps=reps)
 }
 actmods <- lapply(species, fitfunc, 5)
@@ -251,10 +176,6 @@ popdist_plot <- function(sp, mods, cols){
     labs(x = NULL, y = NULL) + 
     theme_classic()
 }
-sp <- "roe_deer"
-popdist <- actmods[[sp]]$est$popdist
-act <- actmods[[sp]]$est$pdf
-
 popact_plot <- function(sp, mods, cols){
   popdist <- mods[[sp]]$est$popdist
   act <- mods[[sp]]$est$pdf
@@ -287,8 +208,8 @@ popdist_plots <- popdist_plots %>%
   lapply(function(plt) plt + theme(legend.position = "none"))
 popdist_plots <- plot_grid(plotlist = popdist_plots, ncol=1)
 
-popact_plots <- lapply(species, popact_plot, actmods, pal)
-popact_plots <- plot_grid(plotlist = popact_plots, ncol=1)
+#popact_plots <- lapply(species, popact_plot, actmods, pal)
+#popact_plots <- plot_grid(plotlist = popact_plots, ncol=1)
 
 xlab <- ggplot(mapping=aes(x=0, y=0, label="Time (h)")) +
   geom_text() +
@@ -299,17 +220,28 @@ ylab1 <- ggplot(mapping=aes(x=0, y=0, label="Activity PDF")) +
 ylab2 <- ggplot(mapping=aes(x=0, y=0, label="Population proportion")) +
   geom_text(angle=90) +
   theme_void()
-ylab3 <- ggplot(mapping=aes(x=0, y=0, label="Population activity")) +
-  geom_text(angle=90) +
-  theme_void()
+#ylab3 <- ggplot(mapping=aes(x=0, y=0, label="Population activity")) +
+#  geom_text(angle=90) +
+#  theme_void()
 lgnd <- plot_grid(legend)
 
+str <- act_strata %>%
+  filter(grepl("deer", species)) %>%
+  mutate(x=1)
+y <- c(0, cumsum(str$area/sum(str$area)))
+y <- 1 - (head(y, -1) + tail(y, -1)) / 2 + c(0,0,0,0.01,0.01,-0.01,0,0)
+lgnd <- ggplot(str, aes(fill=stratumID, y=area, x=x)) + 
+  geom_bar(position="fill", stat="identity", width=0.2, show.legend=FALSE) +
+  annotate("text", x=1.12, y=y, label=str$stratumID, hjust=0) +
+  xlim(c(0.9,3)) +
+  theme_void() 
+  
 plots <- plot_grid(ylab1, act_plots,
                    ylab2, popdist_plots,
-                   ylab3, popact_plots, 
+#                   ylab3, popact_plots, 
                    lgnd,
-                   nrow=1, rel_widths = c(rep(c(1,7),3),4))
-#                    nrow=1, rel_widths = c(rep(c(1,7),2),5))
+#                   nrow=1, rel_widths = c(rep(c(1,7),3),4))
+                    nrow=1, rel_widths = c(rep(c(1,7),2),4))
 print(plot_grid(plots, xlab, ncol=1, rel_heights=c(20,1)))
 
 
@@ -367,19 +299,19 @@ spp_hab <- expand.grid(sp=species, hb=unique(act_strata$habitat),
                        stringsAsFactors=FALSE)
 sel_plots <- lapply(1:nrow(spp_hab), function(i) 
   sel_plot(spp_hab$sp[i], spp_hab$hb[i]))
-sel_plots <- plot_grid(plotlist=sel_plots, nrow=4)
+sel_plots <- plot_grid(plotlist=sel_plots, nrow=7, byrow=FALSE)
 
 # Create plots for marginal labels
 sp_labs <- lapply(sub("_", " ", species), function(sp)
   ggplot(mapping=aes(x=0, y=0, label=sp)) +
-    geom_text() +
-    theme_void())
-sp_labs <- plot_grid(plotlist=sp_labs, nrow=1)
-hb_labs <- lapply(unique(act_strata$habitat), function(hb)
-  ggplot(mapping=aes(x=0, y=0, label=hb)) +
     geom_text(angle=270) +
     theme_void())
-hb_labs <- plot_grid(plotlist=hb_labs, ncol=1)
+sp_labs <- plot_grid(plotlist=sp_labs, ncol=1)
+hb_labs <- lapply(unique(act_strata$habitat), function(hb)
+  ggplot(mapping=aes(x=0, y=0, label=hb)) +
+    geom_text() +
+    theme_void())
+hb_labs <- plot_grid(plotlist=hb_labs, nrow=1)
 x_lab <- ggplot(mapping=aes(x=0, y=0, label="Time (h)")) +
   geom_text() +
   theme_void()
@@ -389,13 +321,12 @@ y_lab <- ggplot(mapping=aes(x=0, y=0, label="Selection index")) +
 blank <- ggplot() + theme_nothing()
 
 # Stich plots together and plot
-row1 <- plot_grid(blank, sp_labs, blank, nrow=1,
+row1 <- plot_grid(blank, hb_labs, blank, nrow=1,
                   rel_widths = c(1,14,1))
-row2 <- plot_grid(y_lab, sel_plots, hb_labs, nrow=1,
+row2 <- plot_grid(y_lab, sel_plots, sp_labs, nrow=1,
                   rel_widths = c(1,16,1))
 row3 <- plot_grid(blank, x_lab, blank, nrow=1,
                   rel_widths = c(1,16,1))
-dev.off()
 plot_grid(row1, row2, row3, ncol=1,
           rel_heights = c(1, 16, 1))
 
