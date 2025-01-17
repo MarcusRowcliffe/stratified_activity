@@ -1,3 +1,8 @@
+library(camtraptor)
+library(camtrapDensity)
+library(dplyr)
+
+
 ## Read Agouti datapackage ####
 dir <- "C:/Users/rowcliffe.m/OneDrive - Zoological Society of London/CameraTrapping/Activity/Stratified activity/Hoge Veluwe data/hoge-veluwe-wildlife-monitoring-project-20240816202112"
 ctdpdat <- read_camtrap_dp(file.path(dir, "datapackage.json"), FALSE)
@@ -50,9 +55,12 @@ spp <- c("Capreolus capreolus", "Cervus elaphus", "Ovis ammon", "Sus scrofa",
          "Vulpes vulpes", "Lepus europaeus", "Meles meles")
 species <- c("roe_deer", "red_deer", "mouflon", "wild_boar",
              "red_fox", "brown_hare", "badger")
+
 ctdpdat$data$observations <- ctdpdat$data$observations %>%
-  mutate(scientificName = ifelse(scientificName=="Leporidae", 
-                                 "Lepus europaeus", scientificName)) %>%
+  mutate(scientificName = case_when(
+    scientificName == "Leporidae" ~ "Lepus europaeus",
+    scientificName == "Martes" ~ "Martes martes",
+    .default = scientificName)) %>%
   filter(scientificName %in% spp) %>%
   mutate(commonName = species[match(scientificName, spp)],
          time = time_of_day(timestamp))
@@ -64,7 +72,7 @@ ctdpdat$data$observations <- ctdpdat$data$observations %>%
 # slice up the data into annual chunks
 starts <- paste0(2014:2020, "-03-01 00:00:00")
 ends <- paste0(2014:2020, "-05-31 00:00:00")
-ctdpdat$data <- ctdpdat$data[-2] # remove media table to make next step run
+ctdpdat$data$media <- NULL # remove media table (un-necessary, allow next step to run)
 ctdpslices <- lapply(1:length(starts), function(i) 
   slice_camtrap_dp(ctdpdat, starts[i], ends[i]))
 #lapply(ctdpslices, plot_deployment_schedule)
