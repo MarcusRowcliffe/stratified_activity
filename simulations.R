@@ -1,6 +1,20 @@
 library(cowplot)
 source("simulation_functions.r")
 
+# Define parameters ####
+# Habitat 1 is active; Habitat 2 is resting
+N <- 50 # population size
+nstr <- 2 # number of strata
+# number of deployments
+deps <- 100
+# stratum areas
+area <- list(skew = c(9, 1),
+             even = c(5, 5))
+# observation sample sizes
+ssize <- list(low=100, med=200, high=500) 
+# Population distribution parameters
+pprm <- list(strong=6, weak=1)
+# Activity pattern parameters
 prms_S1 <- make_act_prms(times = c(6, 10, 15, 18) * pi/12,
                          slopes = c(4, 1, 1, 4),
                          heights = c(dawn=6, day=2, dusk=4, night=0),
@@ -43,35 +57,39 @@ prms_W4 <- make_act_prms(times = c(6, 10, 15, 18) * pi/12,
                          mx = 0.5)
 aprm <- list(strong=list(prms_S1, prms_S2, prms_S3, prms_S4),
              weak=list(prms_W1, prms_W2, prms_W3, prms_W4))
-plot_patterns(aprm$strong)
-plot_patterns(aprm$weak)
 
-# SIMULATION ####
-# Input parameters
-# Habitat 1 is active; Habitat 2 is resting
-N <- 50 # population size
-nstr <- 2 # number of strata
-# number of deployments
-deps <- 100
-area <- list(skew = c(9, 1),
-             even = c(5, 5))
-# observation sample sizes
-ssize <- list(low=100, med=200, high=500) 
-# Population distribution parameters
-pprm <- list(strong=6, weak=1)
-# Activity pattern parameters
-# pp order: pk3,pk2,pk4 (1st peak is implicit)
-aprm <- list(strong = list(make_crep_prm(kap=c(3,0), pp=c(0.2,0.4,0), pks=pi*c(0.5,1.5)),
-                           make_crep_prm(c(3,0), c(0.2,0.2,0), pi*c(0.5,1.5)),
-                           make_crep_prm(c(3,0), c(0.2,0.4,0), pi*c(0.5,1.5), max=0.7),
-                           make_crep_prm(c(3,0), c(0.3,0.6,0), pi*c(0.5,1.5), max=0.7)),
-             weak = list(make_diur_prm(4, 0, pi*0.7, pi*1.3),
-                         make_diur_prm(4, 0, pi*0.5, pi*1.5),
-                         make_diur_prm(4, -1, pi*0.9, pi*1.1, 0.7),
-                         make_crep_prm(c(1,-2), c(0.4, 0.2, 0.1), max=0.7)))
-plot_patterns(c(pprm$strong, aprm$strong))
-plot_patterns(c(pprm$weak, aprm$weak))
+# Plot scenario patterns ####
+scenario_plots <- lapply(1:8, function(s) plot_scenario_patterns(s))
+lgnd <- plot_grid(get_legend(scenario_plots[[1]]), scale=0.1)
+scenario_plots <- scenario_plots %>%
+  map(\(p)  p + theme(legend.position = "none"))
+scenario_plots <- plot_grid(plotlist=scenario_plots, nrow=4, byrow=F)
+void <- ggplot() + theme_void()
+xaxis <- ggplot(mapping=aes(x=0, y=0, label="Time")) + geom_text() + theme_void()
+yaxis <- ggplot(mapping=aes(x=0, y=0, label="Activity level / Population distribution")) + 
+  geom_text(angle=90) + theme_void()
+s <- 0.5
+sidebar <- ggplot() + 
+  lims(x=c(0,2)) +
+  annotate("segment", x=1, y=4, xend=1, yend=0, arrow=arrow(type="closed")) +
+  geom_text(aes(x=1+s, y=2, label="Decreasing alignment between activity patterns"), angle=270) +
+  geom_text(aes(x=1-s, y=0.5+(0:3), label=paste0("A", 1:4))) +
+  scale_y_continuous(expand=c(0,0)) +
+  theme_void()
+topbar <- ggplot() + 
+  lims(y=c(0,2)) +
+  annotate("segment", x=0, y=1, xend=2, yend=1, arrow=arrow(type="closed")) +
+  geom_text(aes(x=1, y=1+s, label="Decreasing strength of shift in patterns")) +
+  geom_text(aes(x=0.5+(0:1), y=1-s, label=c("Strong", "Weak"))) +
+  scale_x_continuous(expand=c(0,0)) +
+  theme_void()
+top <- plot_grid(void, topbar, void, nrow=1, rel_widths = c(1,20,10))
+mid <- plot_grid(yaxis, scenario_plots, sidebar, lgnd, nrow=1, rel_widths=c(1,20,4,6))
+bot <- plot_grid(void, xaxis, void, nrow=1, rel_widths = c(1,20,10))
+scenario_patterns <- plot_grid(top, mid, bot, ncol=1, rel_heights=c(3, 20, 1))
+ggsave("scenario_patterns.png", scenario_patterns)
 
+# Run simulations ####
 scenarios <- expand.grid(alignment=1:4,
                          pattern=c("strong","weak"),
                          config=c("repEven", "repSkew", "strSkew"),
@@ -86,17 +104,6 @@ errors <- calc_errors(res) %>%
 sum(errors$n1==0)
 sum(errors$n2==0)
 View(errors)
-
-# scenario patterns
-scenario_plots <- lapply(1:8, function(s) plot_scenario_patterns(s))
-lgnd <- plot_grid(get_legend(scenario_plots[[1]]), scale=0.1)
-scenario_plots <- lapply(scenario_plots, function(p)
-  p <- p + theme(legend.position = "none"))
-scenario_plots <- plot_grid(plotlist=scenario_plots, nrow=4, byrow=F)
-xaxis <- ggplot(mapping=aes(x=0, y=0, label="Time")) + geom_text() + theme_void()
-plts <- plot_grid(plot_grid(plotlist = list(scenario_plots, xaxis),
-                            nrow=2, rel_heights = c(25,1)))
-plot_grid(plts, lgnd, nrow=1, rel_widths = c(4,1))
 
 # sample sizes
 errors %>%
