@@ -1,5 +1,3 @@
-# pointless comment
-
 library(cowplot)
 source("simulation_functions.r")
 
