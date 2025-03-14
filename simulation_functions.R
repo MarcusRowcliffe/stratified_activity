@@ -1,7 +1,9 @@
+# install.packages("activity")
+
 library(tidyverse)
 library(activity)
-library(camtraptor)
-library(camtrapDensity)
+#library(camtraptor)
+#library(camtrapDensity)
 
 # Von Mises mixture probability density
 
@@ -264,13 +266,15 @@ sa <- function(dat, wt, adj=1, boot=FALSE){
   pdf <- sum_fw / (2*pi*mean(head(sum_fw,-1))) #activity pdf over time
   act <- 1 / (2 * pi * max(pdf)) # overall activity level
   popdist <- fw / sum_fw # population distribution between strata
+  mean_popdist <- apply(popdist, 2, mean) # mean stratum usage
   pa <- popdist * pdf / max(pdf) # population distribution x activity level
   psum <- apply(head(popdist, -1), 2, sum)
   act_stratum <- apply(head(pa, -1), 2, sum) / ifelse(psum==0, 1, psum)
   list(act = act,
        act_stratum = act_stratum,
        pdf = pdf,
-       popdist = popdist)
+       popdist = popdist,
+       mean_popdist = mean_popdist)
 }
 
 # gets summary error list from bootstrap results (boots)
@@ -290,6 +294,12 @@ get_errlist <- function(boots){
   se_act_stratum <- apply(boot_act_stratum, 1, sd)
   ci_act_stratum <- apply(boot_act_stratum, 1, quantile, lim)
   colnames(ci_act_stratum) <- names(se_act_stratum) <- strata
+
+  # mean stratum-specific population distribution errors
+  boot_mean_popdist <- matrix(unlist(boots["mean_popdist", ]), nrow=ns)
+  se_mean_popdist <- apply(boot_mean_popdist, 1, sd)
+  ci_mean_popdist <- apply(boot_mean_popdist, 1, quantile, lim)
+  colnames(ci_mean_popdist) <- names(se_mean_popdist) <- strata
   
   # activity pattern pdf errors
   boot_pdf <- matrix(unlist(boots["pdf", ]), nrow=nt)
@@ -305,9 +315,10 @@ get_errlist <- function(boots){
   colnames(lcl_popdist) <- colnames(ucl_popdist) <- colnames(se_popdist) <- strata
   
   list(se = list(act=se_act, act_stratum=se_act_stratum, pdf=se_pdf, 
-                 popdist=se_popdist),
+                 popdist=se_popdist, mean_popdist=se_mean_popdist),
        ci = list(act=ci_act, act_stratum=ci_act_stratum, pdf=ci_pdf,
-                 popdist=list(lcl=lcl_popdist, ucl=ucl_popdist)))
+                 popdist=list(lcl=lcl_popdist, ucl=ucl_popdist),
+                 mean_popdist=ci_mean_popdist))
 }
 
 # Fit a stratified activity distribution
@@ -325,8 +336,9 @@ get_errlist <- function(boots){
 # pdf: probability density function for overall activity pattern
 # act: overall activity level
 # act_stratum: stratum-specific activity levels
-#obs_data <- dat$obs
-#str_data <- dat$str
+obs_data <- obs
+dep_data <- dep
+str_data <- str
 fitact_strat <- function(obs_data, dep_data, str_data, 
                          speed=NULL, radius=NULL, angle=NULL,
                          adj=1, reps=100, nt=513){
@@ -623,19 +635,18 @@ plot_scenario_patterns <- function(s){
   aln <- scenarios$alignment[s]
   pat <- scenarios$pattern[s]
   p <- pattern(pprm[[pat]])
-  data.frame(Metric = fct_relevel(rep(c("Pop.distribution", "Rel.activity"), each=1026),
-                                  c("Rel.activity", "Pop.distribution")),
+  data.frame(Metric = rep(c("Distribution", "Activity"), each=1026),
              Stratum = rep(as.character(1:2), each=513),
              Time = seq(0, 24, len=513),
              Value = c(1-p, p, 
                        pattern(aprm[[pat]][[1]]),
                        pattern(aprm[[pat]][[aln]]))) %>%
-    ggplot(aes(Time, Value, col=Stratum, lty=Metric)) + 
-    geom_line() +
-    scale_x_continuous(breaks = seq(0,24,6)) + 
-    scale_y_continuous(breaks = 0:1) +
-    theme_classic() +
-    theme(axis.title = element_blank())
+    ggplot(aes(Time, Value, col=Stratum, lty=Metric)) +
+      geom_line() +
+      scale_x_continuous(breaks = seq(0,24,6)) + 
+      scale_y_continuous(breaks = 0:1, limits = 0:1) +
+      theme_classic() +
+      theme(axis.title = element_blank())
 }
 
 make_act_prms <- function(times, slopes, heights, nper, mx){
