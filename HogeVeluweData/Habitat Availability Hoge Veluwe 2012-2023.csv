@@ -1,4 +1,4 @@
-year,habitatNum,habitatOriginal,habitat,species,areapublic,areaOB,arearest
+year,habitatNum,habitatOriginal,habitat,species,areaAccess,areaOtterlosebos,areaRefuge
 2012,1,Driftsand,driftsand,mouflon_wild_boar,803.3,0,136.4
 2012,2,Wet heathland,wet_heath,mouflon_wild_boar,464.75,0,83.5
 2012,3,Dry heathland,dry_heath,mouflon_wild_boar,629.6,0,154.45
