@@ -16,12 +16,12 @@ ctdpdat <- read_camtrap_dp(file.path(dir, "datapackage.json"), FALSE)
 
 # Remove some deployments:
 # - missing_dep has no animal observations and is missing from deployments
-# - locationName codes V## (not in study design)
+# - locationName codes V* (not in study design)
 missing_dep <- "51f1d2cf-403b-49ff-8cf1-3911db9dcb2c"
 ctdpdat$data$media <- data.frame(deploymentID=0) # need this to make next line run
 ctdpdat <- ctdpdat %>%
   subset_deployments(deploymentID != missing_dep &
-                       nchar(locationName) > 3)
+                       substr(locationName,1,1) == "H")
 
 # Standardise location names; add stratumID
 fix_locationNames <- function(x){
@@ -64,6 +64,7 @@ ctdpdat$data$observations <- ctdpdat$data$observations %>%
   filter(scientificName %in% spp) %>%
   mutate(commonName = species[match(scientificName, spp)],
          time = time_of_day(timestamp))
+
 #ctdpdat$data$observations %>%
 #  filter(is.na(time)) %>%
 #  View()
@@ -91,7 +92,7 @@ ctdpbound$data$observations <- ctdpslices %>%
 table(ctdpbound$data$observations$commonName) %>%
   sort()
 
-dir.create("HogeVeluweData")
+dir.create("HogeVeluweData2")
 ctdpbound$data$deployments %>%
   write.csv("./HogeVeluweData/deployments.csv", row.names = FALSE)
 ctdpbound$data$observations %>%
