@@ -1,5 +1,5 @@
 library(cowplot)
-source("simulation_functions.r")
+source("simulation_functions.R")
 
 # Define parameters ####
 # Habitat 1 is active; Habitat 2 is resting
@@ -59,6 +59,14 @@ aprm <- list(strong=list(prms_S1, prms_S2, prms_S3, prms_S4),
              weak=list(prms_W1, prms_W2, prms_W3, prms_W4))
 
 # Plot scenario patterns ####
+scenarios <- expand.grid(alignment=1:4,
+                         pattern=c("strong","weak"),
+                         config=c("repEven", "repSkew", "strSkew"),
+                         effort=c("low", "med", "high"),
+                         stringsAsFactors = FALSE) %>%
+  mutate(depdat = case_when(config=="strSkew" ~ "strat", .default = "rep"),
+         strdat = case_when(config=="repEven" ~ "even", .default = "skew"))
+
 scenario_plots <- lapply(1:8, function(s) plot_scenario_patterns(s))
 lgnd <- plot_grid(get_legend(scenario_plots[[1]]), scale=0.1)
 scenario_plots <- scenario_plots %>%
@@ -87,17 +95,9 @@ top <- plot_grid(void, topbar, void, nrow=1, rel_widths = c(1,20,10))
 mid <- plot_grid(yaxis, scenario_plots, sidebar, lgnd, nrow=1, rel_widths=c(1,20,4,6))
 bot <- plot_grid(void, xaxis, void, nrow=1, rel_widths = c(1,20,10))
 scenario_patterns <- plot_grid(top, mid, bot, ncol=1, rel_heights=c(3, 20, 1))
-ggsave("scenario_patterns.png", scenario_patterns)
+ggsave("scenario_patterns.png", scenario_patterns, height=8, width=8, bg="white")
 
 # Run simulations ####
-scenarios <- expand.grid(alignment=1:4,
-                         pattern=c("strong","weak"),
-                         config=c("repEven", "repSkew", "strSkew"),
-                         effort=c("low", "med", "high"),
-                         stringsAsFactors = FALSE) %>%
-  mutate(depdat = case_when(config=="strSkew" ~ "strat", .default = "rep"),
-         strdat = case_when(config=="repEven" ~ "even", .default = "skew"))
-
 res <- lapply(1:nrow(scenarios), run_scenario_s, reps=4)
 errors <- calc_errors(res) %>%
   mutate(effort = fct_relevel(effort, "low", "med", "high"))
@@ -105,7 +105,7 @@ sum(errors$n1==0)
 sum(errors$n2==0)
 View(errors)
 
-# sample sizes
+# Plot sample sizes ####
 errors %>%
   select(n1, n2, alignment, pattern, config, effort) %>%
   pivot_longer(starts_with("n"), names_to="stratum") %>%

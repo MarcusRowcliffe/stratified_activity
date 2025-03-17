@@ -2,11 +2,11 @@
 # Read deployments and observations 
 # See HogeVeluwe_DataProcessing.r for derivation of these files
 dir <- "./HogeVeluweData"
-deployments <- read.csv(file.path(dir, "./HogeVeluweData/deployments.csv")) %>%
+deployments <- read.csv(file.path(dir, "deployments.csv")) %>%
   mutate(start = lubridate::ymd_hms(start, truncated = 3),
          end = lubridate::ymd_hms(end, truncated = 3))
 
-observations <- read.csv(file.path(dir, "./HogeVeluweData/observations.csv")) %>%
+observations <- read.csv(file.path(dir, "observations.csv")) %>%
   mutate(timestamp = lubridate::ymd_hms(timestamp, truncated = 3))
 
 ## Read stratum data ####
@@ -100,7 +100,10 @@ dep <- deployments %>%
          effort = as.numeric(difftime(end, start, units="days")))
 # function fits stratified activity model for a given species
 fitfunc <- function(sp, reps){
-  if(sp %in% species[5:7]){
+  str <- act_strata %>%
+    filter(grepl(sp, species,))
+  obs <- subset(observations, commonName==sp)
+  if(sp %in% c("badger", "brown_hare", "red_fox")){
     spd <- ang <- rad <- NULL
   } else{
     spdFunc <- function(time, stratum){
@@ -138,15 +141,13 @@ fitfunc <- function(sp, reps){
     ang <- pmat_from_func(angFunc, str)
     rad <- pmat_from_func(radFunc, str)
   }
-  str <- act_strata %>%
-    filter(grepl(sp, species,))
-  obs <- subset(observations, commonName==sp)
   fitact_strat(obs, dep, str, spd, rad, ang, reps=reps)
 }
-actmods <- lapply(species, fitfunc, 5)
-names(actmods) <- species
+spp <- unique(observations$commonName)[c(4,2,5,3,7,1,6)]
+actmods <- lapply(spp, fitfunc, 1000)
+names(actmods) <- spp
 
-# Activity / Population distribution / Combo plots
+## Activity / Population distribution / Combo plots ####
 act_plot <- function(sp, lim=0.15){
   dat <- data.frame(x = tm,
                     y = actmods[[sp]]$est$pdf * pi/12,
@@ -176,37 +177,59 @@ popdist_plot <- function(sp, mods, cols){
     labs(x = NULL, y = NULL) + 
     theme_classic()
 }
-popact_plot <- function(sp, mods, cols){
-  popdist <- mods[[sp]]$est$popdist
-  act <- mods[[sp]]$est$pdf
-  f <- function(x) x/sum(x)
-  pa <- popdist * act
-  
-  pdat <- data.frame(pa = as.vector(pa),
-                     habitat = rep(colnames(popdist), each=nrow(popdist)),
-                     Time = rep(tm, ncol(popdist)))
-  plt <- ggplot(pdat, aes(x=Time, y=pa, fill=habitat)) + 
-    geom_area() +
-    scale_x_continuous(breaks=seq(0,24,6)) +
-    scale_y_continuous(breaks=seq(0,0.3,0.1)) +
-    scale_fill_manual(values=cols) +
-    labs(x = NULL, y = NULL) +
-    theme_classic()
+#popact_plot <- function(sp, mods, cols){
+#  popdist <- mods[[sp]]$est$popdist
+#  act <- mods[[sp]]$est$pdf
+#  f <- function(x) x/sum(x)
+#  pa <- popdist * act
+#  
+#  pdat <- data.frame(pa = as.vector(pa),
+#                     habitat = rep(colnames(popdist), each=nrow(popdist)),
+#                     Time = rep(tm, ncol(popdist)))
+#  plt <- ggplot(pdat, aes(x=Time, y=pa, fill=habitat)) + 
+#    geom_area() +
+#    scale_x_continuous(breaks=seq(0,24,6)) +
+#    scale_y_continuous(breaks=seq(0,0.3,0.1)) +
+#    scale_fill_manual(values=cols) +
+#    labs(x = NULL, y = NULL) +
+#    theme_classic()
   #    theme(panel.background = element_blank())
-  plt + theme(legend.position = "none")
-}
+#  plt + theme(legend.position = "none")
+#}
 
+### Activity plots ####
 tm <- seq(0, 24, len=513)
 pal <- scales::hue_pal()(8)
 
-act_plots <- lapply(species, act_plot)
+act_plots <- lapply(spp, act_plot)
 act_plots <- plot_grid(plotlist = act_plots, ncol=1)
 
-popdist_plots <- lapply(species, popdist_plot, actmods, pal)
+### Population distribution plots ####
+popdist_plots <- lapply(spp, popdist_plot, actmods, pal)
 legend <- get_legend(popdist_plots[[1]])
 popdist_plots <- popdist_plots %>%
   lapply(function(plt) plt + theme(legend.position = "none"))
 popdist_plots <- plot_grid(plotlist = popdist_plots, ncol=1)
+
+### Overall habitat selection ####
+mean_usage_plotlist <- map(actmods, \(m) 
+                           data.frame(estimate = m$est$mean_popdist,
+                                      se = m$se$mean_popdist,
+                                      lcl = m$ci$mean_popdist["2.5%",],
+                                      ucl = m$ci$mean_popdist["97.5%",]) %>%
+                             rownames_to_column("Stratum") %>%
+                             ggplot(aes(Stratum, estimate, fill=Stratum)) +
+                             geom_bar(stat="identity", position=position_dodge()) +
+                             geom_segment(aes(x=Stratum, xend=Stratum, y=lcl, yend=ucl)) +
+                             #      geom_point(size=2) +
+                             geom_point(aes(Stratum, rel_area), str, col="black", shape=45, size=10) +
+                             scale_y_continuous(limits=c(0,0.8), breaks=c(0,0.5)) +
+                             theme_minimal() +
+                             theme(axis.text.x = element_blank(),
+                                   axis.title = element_blank(),
+                                   legend.position = "none")
+)
+mean_usage_plots <- plot_grid(plotlist=mean_usage_plotlist, ncol=1)
 
 #popact_plots <- lapply(species, popact_plot, actmods, pal)
 #popact_plots <- plot_grid(plotlist = popact_plots, ncol=1)
@@ -217,35 +240,39 @@ xlab <- ggplot(mapping=aes(x=0, y=0, label="Time (h)")) +
 ylab1 <- ggplot(mapping=aes(x=0, y=0, label="Activity PDF")) +
   geom_text(angle=90) +
   theme_void()
-ylab2 <- ggplot(mapping=aes(x=0, y=0, label="Population proportion")) +
+ylab2 <- ggplot(mapping=aes(x=0, y=0, label="Habitat usage")) +
   geom_text(angle=90) +
   theme_void()
-#ylab3 <- ggplot(mapping=aes(x=0, y=0, label="Population activity")) +
-#  geom_text(angle=90) +
-#  theme_void()
+ylab3 <- ggplot(mapping=aes(x=0, y=0, label="Overall usage / availability")) +
+  geom_text(angle=90) +
+  theme_void()
 lgnd <- plot_grid(legend)
 
 str <- act_strata %>%
   filter(grepl("deer", species)) %>%
-  mutate(x=1)
-y <- c(0, cumsum(str$area/sum(str$area)))
-y <- 1 - (head(y, -1) + tail(y, -1)) / 2 + c(0,0,0,0.01,0.01,-0.01,0,0)
-lgnd <- ggplot(str, aes(fill=stratumID, y=area, x=x)) + 
-  geom_bar(position="fill", stat="identity", width=0.2, show.legend=FALSE) +
-  annotate("text", x=1.12, y=y, label=str$stratumID, hjust=0) +
-  xlim(c(0.9,3)) +
-  theme_void() 
+  mutate(x=1,
+         Stratum=stratumID)
+total_area <- sum(str$area)
+str$rel_area <- str$area/total_area
+
+#y <- c(0, cumsum(str$area/sum(str$area)))
+#y <- 1 - (head(y, -1) + tail(y, -1)) / 2 + c(0,0,0,0.01,0.01,-0.01,0,0)
+#lgnd <- ggplot(str, aes(fill=stratumID, y=area, x=x)) + 
+#  geom_bar(position="fill", stat="identity", width=0.2, show.legend=FALSE) +
+#  annotate("text", x=1.12, y=y, label=str$stratumID, hjust=0) +
+#  xlim(c(0.9,3)) +
+#  theme_void() 
   
 plots <- plot_grid(ylab1, act_plots,
                    ylab2, popdist_plots,
-#                   ylab3, popact_plots, 
+                   ylab3, mean_usage_plots, 
                    lgnd,
-#                   nrow=1, rel_widths = c(rep(c(1,7),3),4))
-                    nrow=1, rel_widths = c(rep(c(1,7),2),4))
+                   nrow=1, rel_widths = c(rep(c(1,7),3),8))
 print(plot_grid(plots, xlab, ncol=1, rel_heights=c(20,1)))
+ggsave("HogeVeluwe_estimates.png", plots, height=7, width=6, bg="white")
 
 
-## Habitat selection ####
+## Temporal habitat selection ####
 # Create plot for species sp and habitat hb
 sel_plot <- function(sp, hb){
   
@@ -348,7 +375,7 @@ alevel_plot <- function(sp){
     coord_cartesian(ylim=c(0.2, 0.7)) +
     theme_classic()
 }
-alevel_plots <- lapply(species, alevel_plot)
+alevel_plots <- lapply(spp, alevel_plot)
 alevel_plots <- alevel_plots %>%
   lapply(function(plt) 
     plt + theme(legend.position = "none",
