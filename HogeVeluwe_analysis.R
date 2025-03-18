@@ -226,15 +226,16 @@ alevel_plot <- function(sp){
                                 lcl = ci$act_stratum[1,],
                                 ucl = ci$act_stratum[2,])) %>%
     rownames_to_column("stratum")
-  
+  act_level <- actmods[[sp]]$est$act
   ggplot(str_actdat, aes(x=stratum, y=est, fill=stratum)) + 
     geom_bar(stat="identity",
              position=position_dodge()) +
-    geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.2,
+    geom_errorbar(aes(ymin=lcl, ymax=ucl, col=stratum), width=.2,
                   position=position_dodge(.9)) +
+    geom_hline(yintercept = act_level, col="grey35", lty=2) +
     labs(x = NULL, y = NULL) +
-    scale_y_continuous(limits=0:1, breaks=0:1) +
-    theme_minimal() +
+    scale_y_continuous(limits=0:1, breaks=seq(0,1,0.25), labels=c("0","","","","1")) +
+    theme_classic() +
     theme(legend.position = "none",
           axis.text.x = element_blank())
 }
@@ -266,10 +267,13 @@ mean_usage_plotlist <- map(actmods, \(m)
                              rownames_to_column("Stratum") %>%
   ggplot(aes(Stratum, estimate, fill=Stratum)) +
     geom_bar(stat="identity", position=position_dodge()) +
-    geom_segment(aes(x=Stratum, xend=Stratum, y=lcl, yend=ucl)) +
+    geom_errorbar(aes(ymin=lcl, ymax=ucl, col=Stratum), width=0.2, 
+                 position=position_dodge(.9)) +
     geom_point(aes(Stratum, rel_area), str, col="black", shape=45, size=10) +
-    scale_y_continuous(limits=c(0,0.8), breaks=c(0,0.5)) +
-    theme_minimal() +
+    scale_y_continuous(breaks=c(0.001,0.01,0.1,1), 
+                       labels=c("-3", "-2", "-1", "0")) +
+    coord_trans(ylim=c(0.001,1), y="log10") +
+    theme_classic() +
     theme(axis.text.x = element_blank(),
           axis.title = element_blank(),
           legend.position = "none")
@@ -289,7 +293,7 @@ ylab2 <- ggplot(mapping=aes(x=0, y=0, label="Habitat usage")) +
 ylab3 <- ggplot(mapping=aes(x=0, y=0, label="Mean activity level")) +
   geom_text(angle=90) +
   theme_void()
-ylab4 <- ggplot(mapping=aes(x=0, y=0, label="Overall usage / availability")) +
+ylab4 <- ggplot(mapping=aes(x=0, y=0, label="Overall usage / availability (log10)")) +
   geom_text(angle=90) +
   theme_void()
 
@@ -352,10 +356,10 @@ sel_plot <- function(sp, hb){
            type = unlist(lapply(hab_typ, function(x) x[2])))
   
   cols <- switch(hb,
-                 forest = pal[1:2],
-                 heath = pal[3:4],
-                 meadow = pal[5:6],
-                 sand = pal[7:8])
+                 Dune = pal[1:2],
+                 Forest = pal[3:4],
+                 Heath = pal[5:6],
+                 Meadow = pal[7:8])
   plt <- elec %>%
     filter(habitat==hb) %>%
     ggplot(aes(x = time, y = value)) +
@@ -367,8 +371,8 @@ sel_plot <- function(sp, hb){
     scale_x_continuous(limits=c(0, 24), breaks=seq(0,24,6)) +
     scale_y_continuous(limits=c(-1, 1), breaks=seq(-1,1,1)) +
     labs(x = NULL, y = NULL) + 
-    theme_classic()
-  plt + theme(legend.position = "none")
+    theme_classic() +
+    theme(legend.position = "none")
 }
 
 # Create plot list
@@ -379,7 +383,7 @@ sel_plots <- lapply(1:nrow(spp_hab), function(i)
 sel_plots <- plot_grid(plotlist=sel_plots, nrow=7, byrow=FALSE)
 
 # Create plots for marginal labels
-sp_labs <- lapply(sub("_", " ", species), function(sp)
+sp_labs <- lapply(sub("_", " ", spp), function(sp)
   ggplot(mapping=aes(x=0, y=0, label=sp)) +
     geom_text(angle=270) +
     theme_void())
@@ -406,5 +410,5 @@ row3 <- plot_grid(blank, x_lab, blank, nrow=1,
                   rel_widths = c(1,16,1))
 temporal_electivity <- plot_grid(row1, row2, row3, ncol=1,
           rel_heights = c(1, 16, 1))
-ggsave("Temoporal_electivity.png", temporal electivity, height=6, width=6, bg="white")
+ggsave("Temoporal_electivity.png", temporal_electivity, height=8, width=6, bg="white")
 
