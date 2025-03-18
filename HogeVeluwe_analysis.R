@@ -1,25 +1,14 @@
-# ANALYSIS: ACTIVITY/HABITAT USE ####
-# Read deployments and observations 
+# Load datapackage ####
 # See HogeVeluwe_DataProcessing.r for derivation of these files
 dir <- "./HogeVeluweData"
 deployments <- read.csv(file.path(dir, "deployments.csv")) %>%
   mutate(start = lubridate::ymd_hms(start, truncated = 3),
          end = lubridate::ymd_hms(end, truncated = 3))
-# Total effort
-actual_effort <- deployments %>%
-  mutate(camdays = difftime(end, start, units="days")) %>%
-  summarise(sum(camdays))
-total_deployments <- deployments %>%
-  group_by(year) %>%
-  summarise(nDeps = length(unique(locationName))) %>%
-  summarise(sum(nDeps))
-theoretical_effort <- total_deployments * 92
-actual_effort/theoretical_effort
 
 observations <- read.csv(file.path(dir, "observations.csv")) %>%
   mutate(timestamp = lubridate::ymd_hms(timestamp, truncated = 3))
 
-## Read stratum data ####
+# Load stratum data ####
 # Raw stratum data
 full_strata <- read.csv(file.path(dir, "Habitat Availability Hoge Veluwe 2012-2023.csv"))
 # Stratum data for density analysis: 
@@ -29,12 +18,12 @@ full_strata <- read.csv(file.path(dir, "Habitat Availability Hoge Veluwe 2012-20
 # - add stratumID
 den_strata <- full_strata %>%
   filter(habitat != "water") %>%
-  mutate(areaOB = ifelse(year<2018, 0, areaOB),
+  mutate(areaOtterlosebos = ifelse(year<2018, 0, areaOtterlosebos),
          habitat = case_when(
-           habitat=="driftsand" ~ "sand",
-           habitat %in% c("forest_culture", "pine_woodland") ~ "forest",
-           habitat %in% c("dry_heath", "wet_heath", "other") ~ "heath",
-           habitat=="meadow" ~ "meadow",)) %>%
+           habitat=="driftsand" ~ "Dune",
+           habitat %in% c("forest_culture", "pine_woodland") ~ "Forest",
+           habitat %in% c("dry_heath", "wet_heath", "other") ~ "Heath",
+           habitat=="meadow" ~ "Meadow",)) %>%
   pivot_longer(starts_with("area"),
                names_to = "type",
                values_to = "area") %>%
@@ -46,7 +35,7 @@ den_strata <- full_strata %>%
 # - merge OB with public
 # - average areas over years
 act_strata <- den_strata %>%
-  mutate(type = ifelse(type=="OB", "public", type),
+  mutate(type = ifelse(type=="Otterlosebos", "Access", type),
          stratumID = paste(habitat, type),
          species = ifelse(grepl("deer", species),
                           paste0(species, "_badger_red_fox_brown_hare"),
@@ -56,7 +45,7 @@ act_strata <- den_strata %>%
   group_by(species, habitat, type, stratumID) %>%
   summarise(area = mean(area))
 
-## Read REM parameters ####
+# Load REM parameters ####
 spd_dat <- read.csv(file.path(dir, "speed.csv")) %>%
   group_by(species, time, habitat2) %>%
   summarise(est = mean(speed),
@@ -89,8 +78,47 @@ ang_dat <- read.csv(file.path(dir, "angle.csv")) %>%
 #         stratumID = paste(habitat, type))
 #View(ang_dat)
 
+# Data summaries ####
+# stratum proportional coverage 
+str <- act_strata %>%
+  filter(grepl("deer", species)) %>%
+  mutate(x=1,
+         Stratum=stratumID)
+total_area <- sum(str$area)
+str$rel_area <- str$area/total_area
+str %>%
+  group_by(habitat) %>%
+  summarise(sum(rel_area))
+# Total effort
+actual_effort <- deployments %>%
+  mutate(camdays = difftime(end, start, units="days")) %>%
+  summarise(sum(camdays))
+total_deployments <- deployments %>%
+  group_by(year) %>%
+  summarise(nDeps = length(unique(locationName))) %>%
+  summarise(sum(nDeps))
+theoretical_effort <- 48 * 7 * 92 # locations x years x days/yr
+actual_effort
+actual_effort/theoretical_effort
 
-## Stratified activity models ####
+# Stratum areas, effort, observations
+area <- act_strata %>%
+  ungroup() %>%
+  filter(grepl("deer", species)) %>%
+  select(stratumID, area)
+effort <- deployments %>%
+  summarise(effort = as.numeric(sum(difftime(end, start, units="days"))), .by=stratumID) %>%
+  arrange(stratumID)
+nobs <- observations %>%
+  left_join(deployments, by="deploymentID") %>%
+  group_by(stratumID, scientificName) %>%
+  summarise(observations = n()) %>%
+  pivot_wider(names_from=scientificName, values_from = observations)
+summary_table <- area %>%
+  left_join(effort) %>%
+  left_join(nobs)
+
+# Fit stratified activity models ####
 lat <- 52.084025
 lon <- 5.837495
 st <- activity::get_suntimes("2020-04-15", lat, lon, 0)
@@ -106,9 +134,9 @@ dblsig <- function(time, e1, e2, slp=15){
 # - merge OB with public
 # - add effort field
 dep <- deployments %>%
-  mutate(stratumID = sub("OB", "public", stratumID),
-         effort = as.numeric(difftime(end, start, units="days")))
+  mutate(effort = as.numeric(difftime(end, start, units="days")))
 # function fits stratified activity model for a given species
+sp <- spp[1]
 fitfunc <- function(sp, reps){
   str <- act_strata %>%
     filter(grepl(sp, species,))
@@ -157,7 +185,9 @@ spp <- unique(observations$commonName)[c(4,2,5,3,7,1,6)]
 actmods <- lapply(spp, fitfunc, 1000)
 names(actmods) <- spp
 
-## Activity / Population distribution / Combo plots ####
+# PLOTS ####
+## Activity / Population distribution plots ####
+### Plot functions ####
 # activity patterns
 act_plot <- function(sp, lim=0.15){
   dat <- data.frame(x = tm,
@@ -223,11 +253,11 @@ popdist_plots <- popdist_plots %>%
   lapply(function(plt) plt + theme(legend.position = "none"))
 popdist_plots <- plot_grid(plotlist = popdist_plots, ncol=1)
 
-### Stratum activity levels ####
+### Stratum activity level plots ####
 alevel_plots <- lapply(spp, alevel_plot)
 alevel_plots <- plot_grid(plotlist=alevel_plots, ncol=1)
 
-### Overall habitat selection ####
+### Mean usage plots ####
 mean_usage_plotlist <- map(actmods, \(m) 
                            data.frame(estimate = m$est$mean_popdist,
                                       se = m$se$mean_popdist,
@@ -246,6 +276,7 @@ mean_usage_plotlist <- map(actmods, \(m)
 )
 mean_usage_plots <- plot_grid(plotlist=mean_usage_plotlist, ncol=1)
 
+### Labels ####
 xlab <- ggplot(mapping=aes(x=0, y=0, label="Time (h)")) +
   geom_text() +
   theme_void()
@@ -262,14 +293,14 @@ ylab4 <- ggplot(mapping=aes(x=0, y=0, label="Overall usage / availability")) +
   geom_text(angle=90) +
   theme_void()
 
-# Legend
+### Legend ####
 gap <- 0.1
 xx <- (0:7) + rep(seq(0, 3*gap, gap), each=2)
 sNames <- names(actmods$roe_deer$est$act_stratum) 
 name_list <- strsplit(sNames, " ")
 hNames <- map_chr(name_list, \(x) x[1]) %>% unique()
 aNames <- map_chr(name_list, \(x) x[2]) %>% unique()
-txt_sz <- 3.5
+txt_sz <- 3
 legend <- data.frame(stratum = rep(sNames, 2),
            x = c(xx, xx+1),
            y1 = 0,
@@ -281,23 +312,14 @@ legend <- data.frame(stratum = rep(sNames, 2),
     theme_void() +
     theme(legend.position = "none")
 
-str <- act_strata %>%
-  filter(grepl("deer", species)) %>%
-  mutate(x=1,
-         Stratum=stratumID)
-total_area <- sum(str$area)
-str$rel_area <- str$area/total_area
-str %>%
-  group_by(habitat) %>%
-  summarise(sum(rel_area))
-
+### Combination plot construction ####
 plots <- plot_grid(ylab1, act_plots,
                    ylab2, popdist_plots,
                    ylab3, alevel_plots,
                    ylab4, mean_usage_plots, 
                    nrow=1, rel_widths = c(rep(c(1,8),4)))
-plots_legend <- plot_grid(plots, legend, ncol=1, rel_heights=c(20,1))
-ggsave("HogeVeluwe_estimates.png", plots_legend, height=7, width=6, bg="white")
+combo_plot <- plot_grid(plots, legend, ncol=1, rel_heights=c(20,1))
+ggsave("HogeVeluwe_estimates.png", combo_plot, height=7, width=6, bg="white")
 
 
 ## Temporal habitat selection ####
@@ -350,7 +372,7 @@ sel_plot <- function(sp, hb){
 }
 
 # Create plot list
-spp_hab <- expand.grid(sp=species, hb=unique(act_strata$habitat),
+spp_hab <- expand.grid(sp=spp, hb=unique(act_strata$habitat),
                        stringsAsFactors=FALSE)
 sel_plots <- lapply(1:nrow(spp_hab), function(i) 
   sel_plot(spp_hab$sp[i], spp_hab$hb[i]))
@@ -382,6 +404,7 @@ row2 <- plot_grid(y_lab, sel_plots, sp_labs, nrow=1,
                   rel_widths = c(1,16,1))
 row3 <- plot_grid(blank, x_lab, blank, nrow=1,
                   rel_widths = c(1,16,1))
-plot_grid(row1, row2, row3, ncol=1,
+temporal_electivity <- plot_grid(row1, row2, row3, ncol=1,
           rel_heights = c(1, 16, 1))
+ggsave("Temoporal_electivity.png", temporal electivity, height=6, width=6, bg="white")
 
